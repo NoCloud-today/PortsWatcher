@@ -7,6 +7,7 @@ from datetime import datetime
 import nmap3
 import configparser
 from urllib.parse import quote
+from concurrent.futures import ProcessPoolExecutor, Future, as_completed
 import subprocess
 
 
@@ -26,17 +27,17 @@ def get_config() -> tuple:
 
     try:
         config.read("settings.ini")
-        bash_command = config["NOTIFICATION"]["NOTIFICATION_CMD"]
-        message_template = config["NOTIFICATION"]["NOTIFICATION_TEMPLATE"]
+        bash_command_conf = config["NOTIFICATION"]["NOTIFICATION_CMD"]
+        message_template_conf = config["NOTIFICATION"]["NOTIFICATION_TEMPLATE"]
 
-        if bash_command == '':
+        if bash_command_conf == '':
             sys.stderr.write(
                 f"\033[mConfiguration error: Check the environment variables: NOTIFICATION_CMD.\033[0m\n"
             )
             sys.stderr.flush()
             exit(1)
 
-        if message_template == '':
+        if message_template_conf == '':
             sys.stderr.write(
                 f"\033[mConfiguration error: Check the environment variables: NOTIFICATION_TEMPLATE.\033[0m\n"
             )
@@ -50,36 +51,37 @@ def get_config() -> tuple:
         sys.stderr.flush()
         exit(1)
 
-    hosts = {}
+    hosts_conf = {}
 
     for section in config.sections():
-        for host in config[section]:
-            if host.startswith('host'):
-                if config[section][host] == '':
+        for host_conf in config[section]:
+            if host_conf.startswith('host'):
+                if config[section][host_conf] == '':
                     sys.stderr.write(
                         f"\033[33mWarning: The host {section} is empty. It will be skipped.\033[0m\n"
                     )
                     sys.stderr.flush()
                 else:
-                    hosts[section] = config[section][host]
+                    hosts_conf[section] = config[section][host_conf]
 
-    return bash_command, message_template, hosts
+    return bash_command_conf, message_template_conf, hosts_conf
 
 
-def scan_nmap(filename: str, host: str, name: str) -> None:
+def scan_nmap(filename_scan: str, host_scan: str, name_host: str) -> None:
     """
     Performs a Nmap scan on the specified host and saves the results to an XML file.
 
     Args:
-        filename (str): The name of the XML file where the scan results will be saved.
-        host (str): The target host IP address or hostname.
-        name (str): A descriptive name for the scan.
+        filename_scan (str): The name of the XML file where the scan results will be saved.
+        host_scan (str): The target host IP address or hostname.
+        name_host (str): A descriptive name for the scan.
     """
     nmap = nmap3.NmapScanTechniques()
 
     try:
-        nmap.nmap_tcp_scan(target=host,
-                           args="-p0-65535 -v -A -T4 -Pn -sT -sU -oX {}.xml".format(filename))
+        nmap.nmap_tcp_scan(target=host_scan,
+                           args="-vv -sT -sU -p0-65535 -T4 -Pn --max-rtt-timeout 200ms --max-retries 3 --max-scan-delay 2 -oX {}".format(
+                               filename_scan))
 
     except nmap3.exceptions.NmapXMLParserError as e:
         pass
@@ -92,42 +94,49 @@ def scan_nmap(filename: str, host: str, name: str) -> None:
         exit(1)
 
     sys.stdout.write(
-        f"\033[92mScan \"{name}\" have been successfully received.\033[0m\n"
+        f"\033[92mScan \"{name_host}\" have been successfully received.\033[0m\n"
     )
     sys.stdout.flush()
 
 
-def curl_handler(process: subprocess.CompletedProcess, id: str) -> bool:
+def curl_handler(process_curl: subprocess.CompletedProcess, name_host: str) -> bool:
     """
     Handles the response from a cURL command used for sending notifications.
 
     Args:
-        process (subprocess.CompletedProcess): The completed subprocess object.
-        id (str): An identifier for the scan.
+        process_curl (subprocess.CompletedProcess): The completed subprocess object.
+        name_host (str): An identifier for the scan.
 
     Returns:
         bool: True if the notification was sent successfully, False otherwise.
     """
     try:
-        json_data = json.loads(process.stdout)
+        json_data_result = json.loads(process_curl.stdout)
 
-        if json_data["ok"]:
+        if json_data_result["ok"]:
             sys.stdout.write(
-                f"\033[92mThe scan \"{id}\" has been sent successfully.\033[0m\n"
+                f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
             )
             sys.stdout.flush()
 
         else:
             sys.stderr.write(
-                f"\033[mScan \"{id}\" was not sent successfully.\n{process.stdout}\033[0m\n"
+                f"\033[mScan \"{name_host}\" was not sent successfully.\n{process_curl.stdout}\033[0m\n"
             )
             sys.stderr.flush()
             return False
 
     except json.JSONDecodeError:
         sys.stderr.write(
-            f"\033[mScan \"{id}\" was not sent successfully: NOTIFICATION_CMD error: Check the curl "
+            f"\033[mScan \"{name_host}\" was not sent successfully: NOTIFICATION_CMD error: Check the curl "
             f"cmd.\033[0m\n"
+        )
+        sys.stderr.flush()
+        return False
+
+    except KeyError as e:
+        sys.stderr.write(
+            f"\033[mScan \"{name_host}\" was not sent successfully: {e}\n.\033[0m\n{json.dumps(json_data_result, indent=4)}\n"
         )
         sys.stderr.flush()
         return False
@@ -135,58 +144,58 @@ def curl_handler(process: subprocess.CompletedProcess, id: str) -> bool:
     return True
 
 
-def not_curl_handler(process: subprocess.CompletedProcess, id: str) -> bool:
+def not_curl_handler(process_not_curl: subprocess.CompletedProcess, name_host: str) -> bool:
     """
     Handles the response from a non-cURL command used for sending notifications.
 
     Args:
-        process (subprocess.CompletedProcess): The completed subprocess object.
-        id (str): An identifier for the scan.
+        process_not_curl (subprocess.CompletedProcess): The completed subprocess object.
+        name_host (str): An identifier for the scan.
 
     Returns:
         bool: True if the notification was sent successfully, False otherwise.
     """
-    if process.returncode == 0:
+    if process_not_curl.returncode == 0:
         sys.stdout.write(
-            f"\033[92mThe scan \"{id}\" has been sent successfully.\033[0m\n"
+            f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
         )
         sys.stdout.flush()
         return True
 
     else:
         sys.stderr.write(
-            f"\033[mScan \"{id}\" was not sent successfully.\n{process.stderr}\033[0m\n"
+            f"\033[mScan \"{name_host}\" was not sent successfully.\n{process_not_curl.stderr}\033[0m\n"
         )
         sys.stderr.flush()
         return False
 
 
-def send_notification(bash_command: str, message: str, id: str) -> bool:
+def send_notification(bash_command_send: str, message_send: str, name_host: str) -> bool:
     """
     Sends a notification based on the provided command and message.
 
     Args:
-        bash_command (str): The command to execute for sending the notification.
-        message (str): The message to include in the notification.
-        id (str): An identifier for the scan.
+        bash_command_send (str): The command to execute for sending the notification.
+        message_send (str): The message to include in the notification.
+        name_host (str): An identifier for the scan.
 
     Returns:
         bool: True if the notification was sent successfully, False otherwise.
     """
-    if "curl" in bash_command:
-        bash_command_message = bash_command.replace("{MESSAGE}", quote(message))
+    if "curl" in bash_command_send:
+        bash_command_message = bash_command_send.replace("{MESSAGE}", quote(message_send))
     else:
-        bash_command_message = bash_command.replace(
-            "{MESSAGE}", message)
+        bash_command_message = bash_command_send.replace(
+            "{MESSAGE}", message_send)
 
     process = subprocess.run(
         bash_command_message, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
 
     return (
-        curl_handler(process, id)
-        if "curl" in bash_command
-        else not_curl_handler(process, id)
+        curl_handler(process, name_host)
+        if "curl" in bash_command_send
+        else not_curl_handler(process, name_host)
     )
 
 
@@ -209,6 +218,37 @@ def get_ports(root: ET.Element) -> dict:
         ports_dict[port_id] = {'protocol': protocol, 'state': state}
 
     return ports_dict
+
+
+def find_host_ranges(hosts_check_srt: list) -> list:
+    hosts_check = [int(num_str) for num_str in hosts_check_srt]
+    if hosts_check == []:
+        return []
+    hosts_check.sort()
+    ranges = []
+    start = hosts_check[0]
+
+    for i in range(1, len(hosts_check)):
+        if int(hosts_check[i]) - int(hosts_check[i - 1]) > 1:
+            if start == hosts_check[i - 1]:
+                ranges.append(str(start))
+            else:
+                ranges.append(f'{start} - {hosts_check[i - 1]}')
+            start = hosts_check[i]
+
+    if start == hosts_check[-1]:
+        ranges.append(str(start))
+    else:
+        ranges.append(f'{start} - {hosts_check[-1]}')
+    return ranges
+
+
+def group_and_join(lst, group_size=5):
+    groups = [lst[i:i + group_size] for i in range(0, len(lst), group_size)]
+
+    result = '\n'.join(', '.join(group) for group in groups)
+
+    return result
 
 
 def parse(filename1: str, filename2: str = None) -> str:
@@ -234,25 +274,22 @@ def parse(filename1: str, filename2: str = None) -> str:
         list_ports1 = list(ports1)
         list_ports2 = list(ports2)
 
-        start_before = 'is' if len(ports2) == 1 else 'are'
         ending_before = '' if len(ports2) == 1 else 's'
-
-        message_before = f'There {start_before} {len(ports2)} open port{ending_before}.\n'
+        message_before = f'{len(ports2)} open port{ending_before}.\n'
 
         for port in list_ports1:
             if port in list_ports2:
                 list_ports2.remove(port)
 
-        starting = 'were' if len(list_ports1) > 1 or len(list_ports1) == 0 else 'was'
         ending = '' if len(list_ports1) == 1 else 's'
         last_modified_time = datetime.fromtimestamp((os.path.getmtime(filename1))).strftime("%Y-%m-%d %H:%M:%S")
-        str_ports1 = ': ' + ','.join(list_ports1) if len(list_ports1) > 0 else '.'
 
-        message_prev = f'There {starting} {len(list_ports1)} open port{ending} in the previous scan ({last_modified_time}){str_ports1}\n'
+        message_prev = f'{len(list_ports1)} open port{ending} in the previous scan ({last_modified_time})\n'
         ending = '' if len(list_ports2) == 1 else 's'
-        str_ports2 = ': ' + ','.join(list_ports2) if len(list_ports2) > 0 else '.'
+        ranges_port = find_host_ranges(list_ports2)
+        str_ports2 = ':\n ' + group_and_join(ranges_port) if len(list_ports2) > 0 else '.'
 
-        message_new = f'{len(list_ports2)} open port{ending} detected{str_ports2}'
+        message_new = f'{len(list_ports2)} new open port{ending} detected{str_ports2}'
 
         return message_prev + message_before + message_new
 
@@ -262,7 +299,8 @@ def parse(filename1: str, filename2: str = None) -> str:
         ports1 = list(get_ports(root1))
 
         ending = 's' if len(ports1) > 1 else ""
-        str_ports1 = ': ' + ','.join(ports1) if len(ports1) > 0 else '.'
+        range_ports1 = find_host_ranges(ports1)
+        str_ports1 = ':\n ' + group_and_join(range_ports1) if len(ports1) > 0 else '.'
 
         if len(ports1) > 0:
             message_new = (f"This is the first scan of host.\n"
@@ -273,20 +311,20 @@ def parse(filename1: str, filename2: str = None) -> str:
         return message_new
 
 
-def update_template(message_template: str, message, time: str) -> str:
+def update_template(message_template_up: str, message_send, curr_time: str) -> str:
     """
     Updates a notification message template with specific details.
 
     Args:
-        message_template (str): The original message template.
-        message (str): The message content to insert into the template.
-        time (str): The timestamp to insert into the template.
+        message_template_up (str): The original message template.
+        message_send (str): The message content to insert into the template.
+        curr_time (str): The timestamp to insert into the template.
 
     Returns:
         str: The updated message template.
     """
-    message_content = message_template.replace('{MESSAGE}', message)
-    message_content = message_content.replace('{creationTime}', time)
+    message_content = message_template_up.replace('{MESSAGE}', message_send)
+    message_content = message_content.replace('{creationTime}', curr_time)
 
     return message_content
 
@@ -301,6 +339,23 @@ def is_debug() -> bool:
     return '--debug' in sys.argv
 
 
+def handler_callback(future_curr: Future, info_future: dict) -> None:
+    name_host = info_future['name']
+    if not os.path.exists(f".scan_{name_host}_2.xml"):
+        differences = parse(f".scan_{name_host}_1.xml")
+    else:
+        differences = parse(f".scan_{name_host}_1.xml", f".scan_{name_host}_2.xml")
+        os.remove(f".scan_{name_host}_1.xml")
+        os.rename(f".scan_{name_host}_2.xml", f".scan_{name_host}_1.xml")
+
+    message = update_template(info_future['message_template'], differences, info_future['current_time'])
+    stat = send_notification(info_future['bash_command'], f'{name_host}{message}', name_host)
+
+    if stat and is_debug():
+        sys.stdout.write(f'{name_host}{message}\n')
+        sys.stdout.flush()
+
+
 if __name__ == '__main__':
 
     current_time = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
@@ -310,20 +365,21 @@ if __name__ == '__main__':
 
     bash_command, message_template, hosts = get_config()
 
-    for name, host in hosts.items():
-        if not os.path.exists(f".scan_{name}_1.xml"):
-            scan_nmap(f".scan_{name}_1", host, name)
-            differences = parse(f".scan_{name}_1.xml")
-            message = update_template(message_template, differences, current_time)
-        else:
-            scan_nmap(f".scan_{name}_2", host, name)
-            differences = parse(f".scan_{name}_1.xml", f".scan_{name}_2.xml")
-            message = update_template(message_template, differences, current_time)
-            os.remove(f".scan_{name}_1.xml")
-            os.rename(f".scan_{name}_2.xml", f".scan_{name}_1.xml")
+    with ProcessPoolExecutor() as executor:
+        message_template_lambda = message_template
+        futures = {}
+        for name, host in hosts.items():
+            filename = f".scan_{name}_2.xml" if os.path.exists(f".scan_{name}_1.xml") else f".scan_{name}_1.xml"
+            futures[executor.submit(scan_nmap, filename, host, name)] = name
 
-        stat = send_notification(bash_command, f'{name}{message}', name)
+        for future in as_completed(futures.keys()):
+            name = futures[future]
 
-        if stat and is_debug():
-            sys.stdout.write(f'{name}{message}\n')
-            sys.stdout.flush()
+            data = {
+                'bash_command': bash_command,
+                'message_template': message_template_lambda,
+                'name': name,
+                'current_time': current_time
+            }
+
+            future.add_done_callback(lambda x: handler_callback(x, data))
