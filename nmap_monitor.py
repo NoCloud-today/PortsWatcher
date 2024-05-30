@@ -110,6 +110,14 @@ def curl_handler(process_curl: subprocess.CompletedProcess, name_host: str) -> b
     Returns:
         bool: True if the notification was sent successfully, False otherwise.
     """
+    if process_curl.returncode != 0:
+        sys.stderr.write(
+            f"\033[mScan \"{name_host}\" was not sent successfully.\n{process_curl.stdout}\033[0m\n"
+            f"\033[0m\n"
+        )
+        sys.stderr.flush()
+        return False
+
     try:
         json_data_result = json.loads(process_curl.stdout)
 
