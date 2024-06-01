@@ -54,15 +54,21 @@ def get_config() -> tuple:
     hosts_conf = {}
 
     for section in config.sections():
-        for host_conf in config[section]:
-            if host_conf.startswith('host'):
-                if config[section][host_conf] == '':
+        if section != 'NOTIFICATION':
+            try:
+                if config[section]['HOST'] == '':
                     sys.stderr.write(
                         f"\033[33mWarning: The host {section} is empty. It will be skipped.\033[0m\n"
                     )
                     sys.stderr.flush()
                 else:
-                    hosts_conf[section] = config[section][host_conf]
+                    hosts_conf[section] = config[section]['HOST']
+
+            except KeyError as e:
+                sys.stderr.write(
+                    f"\033[33mWarning: The host {section} does not exist. It will be skipped.\033[0m\n"
+                )
+                sys.stderr.flush()
 
     return bash_command_conf, message_template_conf, hosts_conf
 
