@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -6,7 +5,6 @@ from datetime import datetime
 
 import nmap3
 import configparser
-from urllib.parse import quote
 from concurrent.futures import ProcessPoolExecutor, Future, as_completed
 import subprocess
 
@@ -232,7 +230,7 @@ def parse(filename1: str, filename2: str = None) -> str:
         list_ports2 = list(ports2)
 
         ending_before = '' if len(ports2) == 1 else 's'
-        message_before = f'{len(ports2)} open port{ending_before}.\n'
+        message_before = f'New scan: {len(ports2)} open port{ending_before}.\n'
 
         for port in list_ports1:
             if port in list_ports2:
@@ -241,12 +239,10 @@ def parse(filename1: str, filename2: str = None) -> str:
         ending = '' if len(list_ports1) == 1 else 's'
         last_modified_time = datetime.fromtimestamp((os.path.getmtime(filename1))).strftime("%Y-%m-%d %H:%M:%S")
 
-        message_prev = f'{len(list_ports1)} open port{ending} in the previous scan ({last_modified_time})\n'
+        message_prev = f"Previous scan ({last_modified_time}): {len(list_ports1)} open port{ending}.\n"
         ending = '' if len(list_ports2) == 1 else 's'
-        ranges_port = find_host_ranges(list_ports2)
-        str_ports2 = ':\n' + group_and_join(ranges_port) if len(list_ports2) > 0 else '.'
 
-        message_new = f'{len(list_ports2)} new open port{ending} detected{str_ports2}'
+        message_new = f"New open port{ending} detected: {len(list_ports2)}"
 
         return message_prev + message_before + message_new
 
@@ -256,12 +252,10 @@ def parse(filename1: str, filename2: str = None) -> str:
         ports1 = list(get_ports(root1))
 
         ending = 's' if len(ports1) > 1 else ""
-        range_ports1 = find_host_ranges(ports1)
-        str_ports1 = ':\n' + group_and_join(range_ports1) if len(ports1) > 0 else '.'
 
         if len(ports1) > 0:
             message_new = (f"This is the first scan of host.\n"
-                           f"{len(ports1)} open port{ending} detected{str_ports1}")
+                           f"{len(ports1)} open port{ending} detected.")
         else:
             message_new = "No open ports found"
 
