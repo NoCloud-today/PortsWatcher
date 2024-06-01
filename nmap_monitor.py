@@ -10,6 +10,24 @@ from urllib.parse import quote
 from concurrent.futures import ProcessPoolExecutor, Future, as_completed
 import subprocess
 
+lock_file = "/tmp/PortWatcher.lock"
+
+
+def acquire_lock():
+    global lock_file
+    try:
+        fd = os.open(lock_file, os.O_CREAT | os.O_EXCL)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+
+
+def release_lock():
+    global lock_file
+    if os.path.exists(lock_file):
+        os.remove(lock_file)
+
 
 def get_config() -> tuple:
     """
@@ -105,85 +123,6 @@ def scan_nmap(filename_scan: str, host_scan: str, name_host: str) -> None:
     sys.stdout.flush()
 
 
-def curl_handler(process_curl: subprocess.CompletedProcess, name_host: str) -> bool:
-    """
-    Handles the response from a cURL command used for sending notifications.
-
-    Args:
-        process_curl (subprocess.CompletedProcess): The completed subprocess object.
-        name_host (str): An identifier for the scan.
-
-    Returns:
-        bool: True if the notification was sent successfully, False otherwise.
-    """
-    if process_curl.returncode != 0:
-        sys.stderr.write(
-            f"\033[mScan \"{name_host}\" was not sent successfully.\n{process_curl.stdout}\033[0m\n"
-            f"\033[0m\n"
-        )
-        sys.stderr.flush()
-        return False
-
-    try:
-        json_data_result = json.loads(process_curl.stdout)
-
-        if json_data_result["ok"]:
-            sys.stdout.write(
-                f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
-            )
-            sys.stdout.flush()
-
-        else:
-            sys.stderr.write(
-                f"\033[mScan \"{name_host}\" was not sent successfully.\n{process_curl.stdout}\033[0m\n"
-            )
-            sys.stderr.flush()
-            return False
-
-    except json.JSONDecodeError:
-        sys.stderr.write(
-            f"\033[mScan \"{name_host}\" was not sent successfully: NOTIFICATION_CMD error: Check the curl "
-            f"cmd.\033[0m\n"
-        )
-        sys.stderr.flush()
-        return False
-
-    except KeyError as e:
-        sys.stderr.write(
-            f"\033[mScan \"{name_host}\" was not sent successfully: {e}\n.\033[0m\n{json.dumps(json_data_result, indent=4)}\n"
-        )
-        sys.stderr.flush()
-        return False
-
-    return True
-
-
-def not_curl_handler(process_not_curl: subprocess.CompletedProcess, name_host: str) -> bool:
-    """
-    Handles the response from a non-cURL command used for sending notifications.
-
-    Args:
-        process_not_curl (subprocess.CompletedProcess): The completed subprocess object.
-        name_host (str): An identifier for the scan.
-
-    Returns:
-        bool: True if the notification was sent successfully, False otherwise.
-    """
-    if process_not_curl.returncode == 0:
-        sys.stdout.write(
-            f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
-        )
-        sys.stdout.flush()
-        return True
-
-    else:
-        sys.stderr.write(
-            f"\033[mScan \"{name_host}\" was not sent successfully.\n{process_not_curl.stderr}\033[0m\n"
-        )
-        sys.stderr.flush()
-        return False
-
-
 def send_notification(bash_command_send: str, message_send: str, name_host: str) -> bool:
     """
     Sends a notification based on the provided command and message.
@@ -196,21 +135,25 @@ def send_notification(bash_command_send: str, message_send: str, name_host: str)
     Returns:
         bool: True if the notification was sent successfully, False otherwise.
     """
-    if "curl" in bash_command_send:
-        bash_command_message = bash_command_send.replace("{MESSAGE}", quote(message_send))
-    else:
-        bash_command_message = bash_command_send.replace(
-            "{MESSAGE}", message_send)
+    bash_command_message = bash_command_send.replace("{MESSAGE}", message_send)
 
     process = subprocess.run(
         bash_command_message, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
 
-    return (
-        curl_handler(process, name_host)
-        if "curl" in bash_command_send
-        else not_curl_handler(process, name_host)
-    )
+    if process.returncode == 0:
+        sys.stdout.write(
+            f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
+        )
+        sys.stdout.flush()
+        return True
+
+    else:
+        sys.stderr.write(
+            f"\033[mScan \"{name_host}\" was not sent successfully.\n{process.stderr}\033[0m\n"
+        )
+        sys.stderr.flush()
+        return False
 
 
 def get_ports(root: ET.Element) -> dict:
@@ -301,7 +244,7 @@ def parse(filename1: str, filename2: str = None) -> str:
         message_prev = f'{len(list_ports1)} open port{ending} in the previous scan ({last_modified_time})\n'
         ending = '' if len(list_ports2) == 1 else 's'
         ranges_port = find_host_ranges(list_ports2)
-        str_ports2 = ':\n ' + group_and_join(ranges_port) if len(list_ports2) > 0 else '.'
+        str_ports2 = ':\n' + group_and_join(ranges_port) if len(list_ports2) > 0 else '.'
 
         message_new = f'{len(list_ports2)} new open port{ending} detected{str_ports2}'
 
@@ -314,7 +257,7 @@ def parse(filename1: str, filename2: str = None) -> str:
 
         ending = 's' if len(ports1) > 1 else ""
         range_ports1 = find_host_ranges(ports1)
-        str_ports1 = ':\n ' + group_and_join(range_ports1) if len(ports1) > 0 else '.'
+        str_ports1 = ':\n' + group_and_join(range_ports1) if len(ports1) > 0 else '.'
 
         if len(ports1) > 0:
             message_new = (f"This is the first scan of host.\n"
@@ -372,28 +315,36 @@ def handler_callback(future_curr: Future, info_future: dict) -> None:
 
 if __name__ == '__main__':
 
-    current_time = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    if acquire_lock():
+        current_time = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
-    sys.stdout.write(f"Time: {current_time}.\n")
-    sys.stdout.flush()
+        sys.stdout.write(f"Time: {current_time}.\n")
+        sys.stdout.flush()
 
-    bash_command, message_template, hosts = get_config()
+        bash_command, message_template, hosts = get_config()
 
-    with ProcessPoolExecutor() as executor:
-        message_template_lambda = message_template
-        futures = {}
-        for name, host in hosts.items():
-            filename = f".scan_{name}_2.xml" if os.path.exists(f".scan_{name}_1.xml") else f".scan_{name}_1.xml"
-            futures[executor.submit(scan_nmap, filename, host, name)] = name
+        with ProcessPoolExecutor() as executor:
+            message_template_lambda = message_template
+            futures = {}
+            for name, host in hosts.items():
+                filename = f".scan_{name}_2.xml" if os.path.exists(f".scan_{name}_1.xml") else f".scan_{name}_1.xml"
+                futures[executor.submit(scan_nmap, filename, host, name)] = name
 
-        for future in as_completed(futures.keys()):
-            name = futures[future]
+            for future in as_completed(futures.keys()):
+                name = futures[future]
 
-            data = {
-                'bash_command': bash_command,
-                'message_template': message_template_lambda,
-                'name': name,
-                'current_time': current_time
-            }
+                data = {
+                    'bash_command': bash_command,
+                    'message_template': message_template_lambda,
+                    'name': name,
+                    'current_time': current_time
+                }
 
-            future.add_done_callback(lambda x: handler_callback(x, data))
+                future.add_done_callback(lambda x: handler_callback(x, data))
+
+        release_lock()
+
+    else:
+        sys.stderr.write(f"\033[mPrevious instance still running\033[0m\n")
+        sys.stderr.flush()
+        exit(1)
