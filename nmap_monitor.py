@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -206,7 +207,7 @@ def group_and_join(lst, group_size=5):
     return result
 
 
-def parse(filename1: str, filename2: str = None) -> str:
+def parse(filename1: str, filename2: str = '') -> str:
     """
     Compares two Nmap XML scan results and generates a message describing the differences.
 
@@ -217,7 +218,8 @@ def parse(filename1: str, filename2: str = None) -> str:
     Returns:
         str: A string summarizing the differences between the two scan results.
     """
-    if not (filename2 is None):
+    # script_directory = pathlib.Path(__file__).parent.resolve()
+    if not (filename2 == ''):
         tree1 = ET.parse(filename1)
         tree2 = ET.parse(filename2)
         root1 = tree1.getroot()
@@ -237,7 +239,7 @@ def parse(filename1: str, filename2: str = None) -> str:
                 list_ports2.remove(port)
 
         ending = '' if len(list_ports1) == 1 else 's'
-        last_modified_time = datetime.fromtimestamp((os.path.getmtime(filename1))).strftime("%Y-%m-%d %H:%M:%S")
+        last_modified_time = datetime.fromtimestamp((os.path.getmtime(filename2))).strftime("%Y-%m-%d %H:%M:%S")
 
         message_prev = f"Previous scan ({last_modified_time}): {len(list_ports1)} open port{ending}.\n"
         ending = '' if len(list_ports2) == 1 else 's'
@@ -292,15 +294,18 @@ def is_debug() -> bool:
 
 def handler_callback(future_curr: Future, info_future: dict) -> None:
     name_host = info_future['name']
-    if not os.path.exists(f".scan_{name_host}_2.xml"):
-        differences = parse(f".scan_{name_host}_1.xml")
-    else:
-        differences = parse(f".scan_{name_host}_1.xml", f".scan_{name_host}_2.xml")
-        os.remove(f".scan_{name_host}_1.xml")
-        os.rename(f".scan_{name_host}_2.xml", f".scan_{name_host}_1.xml")
+    filename1 = f"./running_scan/scan_{info_future['name']}.xml"
+    filename2 = f"./finalized_scan/scan_{info_future['name']}_final.xml" if os.path.exists(
+        f"./finalized_scan/scan_{info_future['name']}_final.xml") else ''
+    differences = parse(filename1, filename2)
 
     message = update_template(info_future['message_template'], differences, info_future['current_time'])
     stat = send_notification(info_future['bash_command'], f'{name_host}{message}', name_host)
+
+    os.rename(filename1, filename1.replace('.xml', '_final.xml'))
+    if filename2 != '':
+        os.remove(filename2)
+    shutil.move(filename1.replace('.xml', '_final.xml'), 'finalized_scan')
 
     if stat and is_debug():
         sys.stdout.write(f'{name_host}{message}\n')
@@ -317,12 +322,16 @@ if __name__ == '__main__':
 
         bash_command, message_template, hosts = get_config()
 
+        directory_path_run = './running_scan'
+        directory_path_final = './finalized_scan'
+        os.makedirs(directory_path_run, exist_ok=True)
+        os.makedirs(directory_path_final, exist_ok=True)
+
         with ProcessPoolExecutor() as executor:
             message_template_lambda = message_template
             futures = {}
             for name, host in hosts.items():
-                filename = f".scan_{name}_2.xml" if os.path.exists(f".scan_{name}_1.xml") else f".scan_{name}_1.xml"
-                futures[executor.submit(scan_nmap, filename, host, name)] = name
+                futures[executor.submit(scan_nmap, f"./running_scan/scan_{name}.xml", host, name)] = name
 
             for future in as_completed(futures.keys()):
                 name = futures[future]
