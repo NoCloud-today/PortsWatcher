@@ -221,8 +221,6 @@ def parse(filename1: str, filename2: str = '') -> str:
     if not (filename2 == ''):
         tree1 = ET.parse(filename1)
         tree2 = ET.parse(filename2)
-        print('filename1 = ', filename1)
-        print('filename2 = ', filename2)
         root1 = tree1.getroot()
         root2 = tree2.getroot()
 
@@ -231,9 +229,6 @@ def parse(filename1: str, filename2: str = '') -> str:
 
         list_ports1 = list(ports1)
         list_ports2 = list(ports2)
-
-        print('list_ports1 ', *list_ports1)
-        print('list_ports2 ', *list_ports2)
 
         ending_before = '' if len(ports1) == 1 else 's'
         message_before = f'New scan: {len(ports1)} open port{ending_before}.\n'
