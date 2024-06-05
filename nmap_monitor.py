@@ -311,6 +311,17 @@ def handler_callback(future_curr: Future, info_future: dict) -> None:
         sys.stdout.flush()
 
 
+def preparing_dirs() -> None:
+    directory_path_run = './running_scan'
+    directory_path_final = './finalized_scan'
+    os.makedirs(directory_path_run, exist_ok=True)
+    os.makedirs(directory_path_final, exist_ok=True)
+
+    files = os.listdir('./running_scan')
+    for file in files:
+        os.remove('./running_scan/' + file)
+
+
 if __name__ == '__main__':
 
     if acquire_lock():
@@ -321,10 +332,7 @@ if __name__ == '__main__':
 
         bash_command, message_template, hosts = get_config()
 
-        directory_path_run = './running_scan'
-        directory_path_final = './finalized_scan'
-        os.makedirs(directory_path_run, exist_ok=True)
-        os.makedirs(directory_path_final, exist_ok=True)
+        preparing_dirs()
 
         with ProcessPoolExecutor() as executor:
             message_template_lambda = message_template
