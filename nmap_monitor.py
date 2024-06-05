@@ -218,10 +218,11 @@ def parse(filename1: str, filename2: str = '') -> str:
     Returns:
         str: A string summarizing the differences between the two scan results.
     """
-    # script_directory = pathlib.Path(__file__).parent.resolve()
     if not (filename2 == ''):
         tree1 = ET.parse(filename1)
         tree2 = ET.parse(filename2)
+        print('filename1 = ', filename1)
+        print('filename2 = ', filename2)
         root1 = tree1.getroot()
         root2 = tree2.getroot()
 
@@ -231,20 +232,23 @@ def parse(filename1: str, filename2: str = '') -> str:
         list_ports1 = list(ports1)
         list_ports2 = list(ports2)
 
-        ending_before = '' if len(ports2) == 1 else 's'
-        message_before = f'New scan: {len(ports2)} open port{ending_before}.\n'
+        print('list_ports1 ', *list_ports1)
+        print('list_ports2 ', *list_ports2)
 
-        for port in list_ports1:
-            if port in list_ports2:
-                list_ports2.remove(port)
+        ending_before = '' if len(ports1) == 1 else 's'
+        message_before = f'New scan: {len(ports1)} open port{ending_before}.\n'
 
-        ending = '' if len(list_ports1) == 1 else 's'
+        for port in list_ports2:
+            if port in list_ports1:
+                list_ports1.remove(port)
+
+        ending = '' if len(list_ports2) == 1 else 's'
         last_modified_time = datetime.fromtimestamp((os.path.getmtime(filename2))).strftime("%Y-%m-%d %H:%M:%S")
 
-        message_prev = f"Previous scan ({last_modified_time}): {len(list_ports1)} open port{ending}.\n"
-        ending = '' if len(list_ports2) == 1 else 's'
+        message_prev = f"Previous scan ({last_modified_time}): {len(list_ports2)} open port{ending}.\n"
+        ending = '' if len(list_ports1) == 1 else 's'
 
-        message_new = f"New open port{ending} detected: {len(list_ports2)}"
+        message_new = f"New open port{ending} detected: {len(list_ports1)}"
 
         return message_prev + message_before + message_new
 
