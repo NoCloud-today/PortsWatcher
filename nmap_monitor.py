@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import shlex
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -26,6 +27,16 @@ def release_lock():
     global lock_file
     if os.path.exists(lock_file):
         os.remove(lock_file)
+
+
+def is_debug_mode() -> bool:
+    """
+        Checks if the script is running in debug mode.
+
+        Returns:
+        - bool: True if the script is running in debug mode, False otherwise.
+        """
+    return '--debug' in sys.argv
 
 
 def get_config() -> tuple:
@@ -122,37 +133,33 @@ def scan_nmap(filename_scan: str, host_scan: str, name_host: str) -> None:
     sys.stdout.flush()
 
 
-def send_notification(bash_command_send: str, message_send: str, name_host: str) -> bool:
-    """
-    Sends a notification based on the provided command and message.
+def send_notification(bash_cmd_line: str, message_to_deliver: str, name_host: str) -> bool:
+    message_to_deliver = shlex.quote(message_to_deliver)
+    message_to_deliver = message_to_deliver[1:-1]
+    html_message_to_deliver = '<br/>'.join(message_to_deliver.splitlines())
 
-    Args:
-        bash_command_send (str): The command to execute for sending the notification.
-        message_send (str): The message to include in the notification.
-        name_host (str): An identifier for the scan.
+    bash_cmd_line = bash_cmd_line.replace("{MESSAGE}", message_to_deliver)
+    bash_cmd_line = bash_cmd_line.replace("{HTML_MESSAGE}", html_message_to_deliver)
 
-    Returns:
-        bool: True if the notification was sent successfully, False otherwise.
-    """
-    bash_command_message = bash_command_send.replace("{MESSAGE}", message_send)
+    if is_debug_mode():
+        sys.stdout.write(f"CMD: {bash_cmd_line}")
 
     process = subprocess.run(
-        bash_command_message, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        bash_cmd_line, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
 
-    if process.returncode == 0:
-        sys.stdout.write(
-            f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
-        )
-        sys.stdout.flush()
-        return True
-
-    else:
+    if process.returncode != 0:
         sys.stderr.write(
             f"\033[mScan \"{name_host}\" was not sent successfully.\n{process.stderr}\033[0m\n"
         )
         sys.stderr.flush()
         return False
+
+    sys.stdout.write(
+        f"\033[92mThe scan \"{name_host}\" has been sent successfully.\033[0m\n"
+    )
+    sys.stdout.flush()
+    return True
 
 
 def get_ports(root: ET.Element) -> dict:
@@ -281,16 +288,6 @@ def update_template(message_template_up: str, message_send, curr_time: str) -> s
     return message_content
 
 
-def is_debug() -> bool:
-    """
-        Checks if the script is running in debug mode.
-
-        Returns:
-        - bool: True if the script is running in debug mode, False otherwise.
-        """
-    return '--debug' in sys.argv
-
-
 def handler_callback(future_curr: Future, info_future: dict) -> None:
     name_host = info_future['name']
     filename1 = f"./running_scan/scan_{info_future['name']}.xml"
@@ -306,7 +303,7 @@ def handler_callback(future_curr: Future, info_future: dict) -> None:
         os.remove(filename2)
     shutil.move(filename1.replace('.xml', '_final.xml'), 'finalized_scan')
 
-    if stat and is_debug():
+    if stat and is_debug_mode():
         sys.stdout.write(f'{name_host}{message}\n')
         sys.stdout.flush()
 
@@ -355,6 +352,6 @@ if __name__ == '__main__':
         release_lock()
 
     else:
-        sys.stderr.write(f"\033[mPrevious instance still running\033[0m\n")
+        sys.stderr.write(f"\033[mPrevious instance still running. Have to delete tmp/PortWatcher.lock\033[0m\n")
         sys.stderr.flush()
         exit(1)
