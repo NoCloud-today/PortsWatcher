@@ -4,6 +4,7 @@ import sys
 import shlex
 import xml.etree.ElementTree as ET
 from datetime import datetime
+import signal
 
 import nmap3
 import configparser
@@ -319,7 +320,23 @@ def preparing_dirs() -> None:
         os.remove('./running_scan/' + file)
 
 
+def sig_int_quit_handler(signum, frame) -> None:
+    files = os.listdir('./running_scan')
+    for file in files:
+        os.remove('./running_scan/' + file)
+    release_lock()
+    sys.exit(1)
+
+
+# def sigtstp_handler(signum, frame):
+#     release_lock()
+#     sys.exit(1)
+
+
 if __name__ == '__main__':
+    signal.signal(signal.SIGINT, sig_int_quit_handler)
+    # signal.signal(signal.SIGTSTP, sigtstp_handler)
+    signal.signal(signal.SIGQUIT, sig_int_quit_handler)
 
     if acquire_lock():
         current_time = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
@@ -352,6 +369,7 @@ if __name__ == '__main__':
         release_lock()
 
     else:
-        sys.stderr.write(f"\033[mPrevious instance still running. Have to delete tmp/PortWatcher.lock\033[0m\n")
+        sys.stderr.write(f"\033[mThe previous instance is still running or stopped using SIGTSTP. Have to "
+                         f"delete tmp/Port Watcher.lock\033[0m\n")
         sys.stderr.flush()
         exit(1)
