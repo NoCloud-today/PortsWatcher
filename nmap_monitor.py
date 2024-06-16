@@ -237,13 +237,10 @@ def parse(filename1: str, filename2: str = '') -> str:
 
         list_ports1 = list(ports1)
         list_ports2 = list(ports2)
-        print(list_ports1)
-        print(list_ports2)
 
         ending_before = '' if len(ports1) == 1 else 's'
         message_before = f'New scan: {len(ports1)} open port{ending_before}.\n'
 
-        new_port = []
         close_port = []
 
         for port in list_ports2:
