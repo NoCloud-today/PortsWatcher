@@ -215,7 +215,7 @@ def group_and_join(lst, group_size=5):
     return result
 
 
-def parse(filename1: str, filename2: str = '') -> str:
+def parse(curr_time, filename1: str, filename2: str = '') -> str:
     """
     Compares two Nmap XML scan results and generates a message describing the differences.
 
@@ -239,7 +239,7 @@ def parse(filename1: str, filename2: str = '') -> str:
         list_ports2 = list(ports2)
 
         ending_before = '' if len(ports1) == 1 else 's'
-        message_before = f'New scan: {len(ports1)} open port{ending_before}.\n'
+        message_before = f'Current scan ({curr_time}): {len(ports1)} open port{ending_before}.\n'
 
         close_port = []
 
@@ -257,8 +257,8 @@ def parse(filename1: str, filename2: str = '') -> str:
         str_port_new = ', '.join(list_ports1)
         str_port_prev = ', '.join(close_port)
 
-        message_new = (f"New open port{ending} detected: {len(list_ports1)}\n{str_port_new}\n"
-                       f"Closed ports: {len(close_port)}\n{str_port_prev}")
+        message_new = (f"New open port{ending} detected: {len(list_ports1)} (total)\n{str_port_new}\n"
+                       f"Closed ports: {len(close_port)} (total)\n{str_port_prev}")
 
         return message_prev + message_before + message_new
 
@@ -302,7 +302,7 @@ def handler_callback(future_curr: Future, info_future: dict) -> None:
     filename1 = f"./running_scan/scan_{info_future['name']}.xml"
     filename2 = f"./finalized_scan/scan_{info_future['name']}_final.xml" if os.path.exists(
         f"./finalized_scan/scan_{info_future['name']}_final.xml") else ''
-    differences = parse(filename1, filename2)
+    differences = parse(info_future['current_time'], filename1, filename2)
 
     message = update_template(info_future['message_template'], differences, info_future['current_time'])
     stat = send_notification(info_future['bash_command'], f'{name_host}{message}', name_host)
