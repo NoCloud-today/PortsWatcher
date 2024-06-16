@@ -237,21 +237,31 @@ def parse(filename1: str, filename2: str = '') -> str:
 
         list_ports1 = list(ports1)
         list_ports2 = list(ports2)
+        print(list_ports1)
+        print(list_ports2)
 
         ending_before = '' if len(ports1) == 1 else 's'
         message_before = f'New scan: {len(ports1)} open port{ending_before}.\n'
 
+        new_port = []
+        close_port = []
+
         for port in list_ports2:
             if port in list_ports1:
                 list_ports1.remove(port)
+            else:
+                close_port.append(port)
 
         ending = '' if len(list_ports2) == 1 else 's'
         last_modified_time = datetime.fromtimestamp((os.path.getmtime(filename2))).strftime("%Y-%m-%d %H:%M:%S")
 
         message_prev = f"Previous scan ({last_modified_time}): {len(list_ports2)} open port{ending}.\n"
         ending = '' if len(list_ports1) == 1 else 's'
+        str_port_new = ', '.join(list_ports1)
+        str_port_prev = ', '.join(close_port)
 
-        message_new = f"New open port{ending} detected: {len(list_ports1)}"
+        message_new = (f"New open port{ending} detected: {len(list_ports1)}\n{str_port_new}\n"
+                       f"Closed ports: {len(close_port)}\n{str_port_prev}")
 
         return message_prev + message_before + message_new
 
@@ -261,10 +271,11 @@ def parse(filename1: str, filename2: str = '') -> str:
         ports1 = list(get_ports(root1))
 
         ending = 's' if len(ports1) > 1 else ""
+        str_port = ', '.join(ports1)
 
         if len(ports1) > 0:
             message_new = (f"This is the first scan of host.\n"
-                           f"{len(ports1)} open port{ending} detected.")
+                           f"{len(ports1)} open port{ending} detected.\n{str_port}")
         else:
             message_new = "No open ports found"
 
@@ -328,14 +339,14 @@ def sig_int_quit_handler(signum, frame) -> None:
     sys.exit(1)
 
 
-# def sigtstp_handler(signum, frame):
-#     release_lock()
-#     sys.exit(1)
+def sigtstp_handler(signum, frame):
+    release_lock()
+    sys.exit(1)
 
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, sig_int_quit_handler)
-    # signal.signal(signal.SIGTSTP, sigtstp_handler)
+    signal.signal(signal.SIGTSTP, sigtstp_handler)
     signal.signal(signal.SIGQUIT, sig_int_quit_handler)
 
     if acquire_lock():
