@@ -179,7 +179,11 @@ def get_ports(root: ET.Element) -> dict:
         protocol = port.attrib['protocol']
         port_id = port.attrib['portid']
         state = port.find('state').attrib['state']
-        ports_dict[port_id] = {'protocol': protocol, 'state': state}
+        try:
+            serv_name = port.find('service').attrib['name']
+        except AttributeError:
+            serv_name = ''
+        ports_dict[port_id] = {'protocol': protocol, 'state': state, 'name': serv_name}
 
     return ports_dict
 
@@ -254,25 +258,34 @@ def parse(curr_time, filename1: str, filename2: str = '') -> str:
 
         message_prev = f"Previous scan ({last_modified_time}): {len(list_ports2)} open port{ending}.\n"
         ending = '' if len(list_ports1) == 1 else 's'
-        str_port_new = ', '.join(list_ports1)
-        str_port_prev = ', '.join(close_port)
 
-        message_new = (f"New open port{ending} detected: {len(list_ports1)} (total)\n{str_port_new}\n"
-                       f"Closed ports: {len(close_port)} (total)\n{str_port_prev}")
+        str_prev = ''
+        for key in close_port:
+            str_prev += f"\t- {key}/{ports2[key]['protocol']}: {ports2[key]['name']}\n"
+
+        str_new = ''
+        for key in list_ports1:
+            str_new += f"\t- {key}/{ports1[key]['protocol']}: {ports1[key]['name']}\n"
+
+        message_new = (f"New open port{ending} detected: {len(list_ports1)} (total)\n{str_new}\n"
+                       f"Closed ports: {len(close_port)} (total)\n{str_prev}")
 
         return message_prev + message_before + message_new
 
     else:
         tree1 = ET.parse(filename1)
         root1 = tree1.getroot()
-        ports1 = list(get_ports(root1))
+        ports1 = get_ports(root1)
 
         ending = 's' if len(ports1) > 1 else ""
-        str_port = ', '.join(ports1)
+
+        str_ports = ''
+        for key, value in ports1.items():
+            str_ports += f"\t- {key}/{value['protocol']}: {value['name']}\n"
 
         if len(ports1) > 0:
             message_new = (f"This is the first scan of host.\n"
-                           f"{len(ports1)} open port{ending} detected.\n{str_port}")
+                           f"{len(ports1)} open port{ending} detected.\n{str_ports}")
         else:
             message_new = "No open ports found"
 
