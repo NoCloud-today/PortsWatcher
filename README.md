@@ -1,4 +1,5 @@
 # PortsWatcher
+The tool runs several nmap scans, makes a comparison with the previous scan and inform the user with the tool of choice
 
 # Installation
 
